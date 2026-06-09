@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Thermometer, Droplets, Play, Square, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Thermometer, Droplets, Play, Square, CheckCircle, AlertTriangle } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,16 +19,59 @@ export default function Page() {
   const [targetTemp, setTargetTemp] = useState(50)
   const [maxFanSpeed, setMaxFanSpeed] = useState(false)
 
-  // Mock sensor data
-  const currentMoisture = 18.5
-  const targetMoisture = selectedCrop === 'palay' ? 14.0 : 13.0
-  const currentTemp = 48.2
-  const currentHumidity = 65
-  const heaterOn = isDrying
-  const fanOn = isDrying
+  // Interactive simulation state for presentation
+  const [currentMoisture, setCurrentMoisture] = useState(18.5)
+  const [currentTemp, setCurrentTemp] = useState(32.2)
+  const [currentHumidity, setCurrentHumidity] = useState(65)
+  const [offlineRecords, setOfflineRecords] = useState(1240)
+  const [syncProgress, setSyncProgress] = useState(65)
 
-  // Determine critical temperature state (red if > 55°C)
+  // Targets & Limits
+  const targetMoisture = selectedCrop === 'palay' ? 14.0 : 13.0
   const isCriticalTemp = currentTemp > 55
+  const heaterOn = isDrying && currentTemp < targetTemp + 0.5
+  const fanOn = maxFanSpeed || isDrying || currentTemp > 35.0
+
+  // Simulation Effect for Drying Process
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+    if (isDrying) {
+      interval = setInterval(() => {
+        setCurrentTemp(prev => {
+          if (prev < targetTemp) return +(prev + 0.8).toFixed(1)
+          if (prev > targetTemp + 1) return +(prev - 0.4).toFixed(1)
+          return +(prev + (Math.random() * 0.4 - 0.2)).toFixed(1)
+        })
+        setCurrentMoisture(prev => (prev > targetMoisture ? +(prev - 0.1).toFixed(1) : prev))
+        setCurrentHumidity(prev => (prev > 30 ? Math.max(30, prev - 1) : prev))
+      }, 1000)
+    } else {
+      interval = setInterval(() => {
+        setCurrentTemp(prev => (prev > 32.2 ? +(prev - 0.5).toFixed(1) : 32.2))
+        setCurrentHumidity(prev => (prev < 65 ? prev + 1 : 65))
+      }, 1000)
+    }
+    return () => clearInterval(interval)
+  }, [isDrying, targetTemp, targetMoisture])
+
+  // Simulation Effect for Offline Data Buffering
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+    if (!isOnline) {
+      interval = setInterval(() => {
+        setOfflineRecords(prev => prev + Math.floor(Math.random() * 3) + 1)
+        setSyncProgress(prev => (prev < 90 ? prev + 1 : 90))
+      }, 2000)
+    } else {
+      setSyncProgress(100)
+    }
+    return () => clearInterval(interval)
+  }, [isOnline])
+
+  // Progress Ring Math (Filling up as it dries)
+  const circumference = 2 * Math.PI * 90
+  const moistureProgressRatio = Math.max(0, Math.min(1, (25 - currentMoisture) / (25 - targetMoisture)))
+  const strokeDashoffset = circumference * (1 - moistureProgressRatio)
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4">
@@ -92,8 +135,8 @@ export default function Page() {
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="8"
-                    strokeDasharray={`${2 * Math.PI * 90}`}
-                    strokeDashoffset={`${2 * Math.PI * 90 * (1 - (currentMoisture - targetMoisture) / (100 - targetMoisture))}`}
+                    strokeDasharray={`${circumference}`}
+                    strokeDashoffset={`${strokeDashoffset}`}
                     className="text-blue-500 transition-all duration-500"
                     strokeLinecap="round"
                   />
@@ -147,6 +190,7 @@ export default function Page() {
               <Button
                 onClick={() => setSelectedCrop('palay')}
                 variant={selectedCrop === 'palay' ? 'default' : 'outline'}
+                disabled={isDrying}
                 className="flex-1"
               >
                 Palay
@@ -154,6 +198,7 @@ export default function Page() {
               <Button
                 onClick={() => setSelectedCrop('corn')}
                 variant={selectedCrop === 'corn' ? 'default' : 'outline'}
+                disabled={isDrying}
                 className="flex-1"
               >
                 Corn
@@ -201,7 +246,7 @@ export default function Page() {
                     max={55}
                     step={1}
                     value={[targetTemp]}
-                    onValueChange={(value) => setTargetTemp(value[0])}
+                    onValueChange={(value) => setTargetTemp(typeof value === 'number' ? value : value[0])}
                     className="w-full"
                   />
                   <p className="text-xs text-muted-foreground mt-2">Range: 40°C - 55°C</p>
@@ -239,10 +284,10 @@ export default function Page() {
                 <AlertTriangle className="h-5 w-5 text-orange-500 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-foreground">Buffering locally...</p>
-                  <p className="text-xs text-muted-foreground">1,240 records saved</p>
+                  <p className="text-xs text-muted-foreground">{offlineRecords.toLocaleString()} records saved</p>
                 </div>
               </div>
-              <Progress value={65} className="h-2" />
+              <Progress value={syncProgress} className="h-2" />
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm">
